@@ -1,0 +1,884 @@
+---
+title: "" 
+format:
+  html:
+    css: styles.css
+    theme: united
+    embed-resources: true
+    output-file: automated_report.html
+editor: visual
+params:
+  species: "Strelitzia Nicolai"
+warning: false
+echo: false
+message: false
+error: false
+---
+
+```{r}
+spec <- stringr::str_to_title(params$species)
+cap_spec <- stringr::str_to_title(spec)
+date <- Sys.Date()
+db <- "south_africa_11_09_2024.db"
+
+#quarto_render("quarto_species_report.qmd", 
+             # execute_params = list(species = species_name),
+            #  output_file = paste0(species_name, ".html"))
+
+```
+
+```{=html}
+<style>
+body {
+text-align: justify}
+</style>
+```
+
+# Automated Report on `r cap_spec`
+
+Generated on `r date`
+
+This automated report is designed to deliver enhanced insights into the patent, research and commercial landscape associated with **`r spec`**. It has been produced by collecting and analysing data from patent applications and scientific publications to provide a comprehensive overview of this species.
+
+```{r funcs}
+# Read in packages
+library(dplyr)
+library(ggplot2)
+library(dbplyr)
+library(DBI)
+library(DT) # MIT license
+library(padr)
+library(plotly) # MIT license
+library(duckdb)
+library(reactable)
+library(igraph)
+
+ barfunc <- function(df, xvar = NULL, yvar = "n", head = 15, hjust = 0, linewidth = 11,
+                      fill = "#4e79a7", #old - #226363
+                      grid_colour = "azure1", background = "transparent") {
+    
+    plot <- df %>%
+      arrange(desc(.data[[yvar]])) %>%
+      head({{ head }}) %>%
+      plot_ly(x = ~.data[[yvar]],  y = ~stringr::str_to_title(.data[[xvar]]), type = "bar", color = I("#4e79a7"), #226363
+              orientation = 'h') %>% 
+      layout(yaxis = list(categoryorder = "total ascending")
+             ) %>% 
+      layout(xaxis = list(title = ""),
+             yaxis = list(title = ""))
+  
+     plot
+  }
+
+ncbi_url <- function(x, query, name, type = "NULL") {
+  x <- ""
+  href <- "<a href="
+  close_href <- ">" 
+  close_a <- "</a>"
+  label <- name
+  query <- stringr::str_replace_all(query, " ", "+")
+  ncbi_base <- "https://www.ncbi.nlm.nih.gov/search/all/?term="
+  url <- paste0(ncbi_base, query)
+  out <- paste0(href, shQuote(url), "target=", shQuote("_blank"), close_href, label, close_a)
+}
+
+
+# LENS FUNCTION - used in parameterized reports
+lens_func <- function(x, query, name, type = "NULL") {
+  x <- ""
+  href <- "<a href="
+  close_href <- ">"
+  close_a <- "</a>"
+  label <- name
+  query <- stringr::str_replace_all(query, " ", "%20")
+  if (type == "pat") {
+    lens_base <-  lens_base <- "https://www.lens.org/lens/patent/"
+    ending <- "/frontpage?l=en"
+  } else if (type == "lit") {
+    lens_base <- "https://www.lens.org/lens/search/scholar/list?q="
+    ending <- ""
+  }
+  url <- paste0(lens_base, query, ending)
+  out <- paste0(href, shQuote(url), " target=", shQuote("_blank"), close_href, label, close_a)
+
+  
+}
+
+```
+
+```{r sqlquery}
+
+sqlquery <- function(selectcol = NULL, selectstatement = NULL, tables = NULL, app = FALSE, yearinput1 = NULL, yearinput2 = NULL, pat = TRUE) {
+  conn <- dbConnect(duckdb::duckdb(), db)
+
+parse_tables <- function(tables) {
+  table_list <- unlist(stringr::str_split(tables, ", "))
+  joins <- ""
+  
+  if (length(table_list) > 1) {
+    for (i in 2:length(table_list)) {
+      joins <- paste0(
+        joins,
+        " inner join ", table_list[i],
+        " on ", table_list[i - 1], ".lens_id = ", table_list[i], ".lens_id"
+      )
+    }
+  }
+
+  list(
+    table1 = table_list[1],
+    joins = joins
+  )
+}
+
+  # Helper to construct the filter
+  construct_filter <- function(pat, species) {
+    filter_base <- if (pat) {
+      "pat_year.year_published > 2010"
+    } else {
+      "lit_year.year_published > 2010"
+    }
+    paste0(" where ", filter_base, " and entity_text ilike ", shQuote(paste0("%", species, "%")))
+  }
+
+  # Helper to construct the query
+  construct_query <- function(selectcol, selectstatement, table_info, filters, groupby, app = FALSE, yearinput1 = NULL, yearinput2 = NULL) {
+    res <- if (!is.null(selectcol)) {
+      glue::glue("{selectcol}, count({selectcol}) as n")
+    } else {
+      selectstatement
+    }
+
+    app_filter <- if (app) {
+      paste0(" and year_published between ", yearinput1, " and ", yearinput2)
+    } else {
+      ""
+    }
+    
+    paste0(
+      "select ", res, " from ", table_info$table1,
+      table_info$joins, filters, app_filter, groupby
+    )
+  }
+
+  # Parse tables and filters
+  table_info <- parse_tables(tables)
+  filters <- construct_filter(pat, params$species)
+  groupby <- if (!is.null(selectcol)) paste0(" group by ", selectcol, ";") else ";"
+
+  # Build the query
+  query <- dbGetQuery(
+    conn = conn,
+    statement = construct_query(selectcol, selectstatement, table_info, filters, groupby, app, yearinput1, yearinput2)
+  )
+
+  # Disconnect from the database
+  dbDisconnect(conn, shutdown = TRUE)
+
+  return(query)
+}
+
+
+```
+
+### Patents
+
+::: panel-tabset
+#### Trends Over Time
+
+This graph shows the yearly count of patent applications referencing this particular species. Trends in the volume of these patent applications may be indicative of shifts in commercial interest and investment concerning this species. Note that there can be a delay of 1-2 years before patent data is made available, creating the appearance of a drop in interest.
+
+```{r pat_trend}
+
+pat_trend <- sqlquery(selectstatement = "year_published, pat_year.lens_id", tables = "pat_year, pat_ents") %>% unique() %>% count(year_published)
+ 
+ if(nrow(pat_trend > 0)) {
+ 
+   pat_trend %>% ggplot( aes(x = as.numeric(year_published), y = n)) +
+     geom_bar(stat = 'identity', fill = "#4e79a7") +
+     scale_x_continuous("Year Published", breaks = seq(min(pat_trend$year_published), max(pat_trend$year_published), by = 1)) +
+  #scale_x_continuous("Year Published", breaks = seq(2000, 2022, by = 5)) +
+      xlab("Year") +
+      ylab("Publication Count") +
+      theme(
+        panel.grid.major = element_line(colour = "#e1ebeb"),
+        panel.grid.minor = element_line(colour = "#e1ebeb"),
+        panel.background = element_rect(fill = "white", colour = NA)
+      )
+
+ } else {
+    print("We currently have no data about trends over time for this species")
+  }
+
+
+```
+
+#### Areas of Interest
+
+This graph presents the key topics identified in patent applications that mention `r stringr::str_to_title(params$species)`, providing insights into the principal areas of commercial focus related to this species, highlighting where the majority of research and development efforts are being concentrated.
+
+```{r pat_fos}
+
+pat_fos <- sqlquery(selectstatement = "pat_ipc.description, pat_year.lens_id", tables = "pat_year, pat_ipc, pat_ents") %>% unique() %>% count(description)
+  
+  if (nrow(pat_fos) > 0) {
+    
+    pat_fos$description <- stringr::str_to_title(pat_fos$description)
+    
+    pat_fos %>% barfunc(xvar = "description")
+
+  } else {
+    print("We currently have no data about fields of study for this species")
+  }
+
+```
+
+#### Named Inventors
+
+This graph displays the inventors most frequently identified in patent documents that reference `r params$species`. Named inventors are individuals identified in the patents as the creators of a product. Often, there is a connection between the inventors listed on a patent and earlier scientific studies. This suggests that if a scientist applying for research permission has been previously credited in a patent, there's a significant possibility that their research has commercial objectives.
+
+```{r pat_inv}
+
+pat_inv <- sqlquery(selectstatement = "inventors, pat_year.lens_id", tables = "pat_year, pat_inventors, pat_ents") %>% unique() %>% count(inventors)
+
+   if(nrow(pat_inv) > 0) {
+ 
+pat_inv$inventors <- stringr::str_to_title(pat_inv$inventors)
+ pat_inv %>% barfunc(x = "inventors")
+   } else {
+
+  print("We currently have no data about the top inventors for patents relating to this species")
+     
+  }
+
+```
+
+#### Network
+
+This network graph illustrates the connections between the applicants and the inventors who are named in patents related to this species, showcasing how different applicants are linked through their association with various inventors mentioned in these patents.
+
+```{r pat_net}
+
+library(visNetwork)
+
+links <- sqlquery(
+  selectstatement = "applicants, inventors", 
+  tables = "pat_year, pat_applicants, pat_inventors, pat_ents") %>% unique() %>% subset(applicants != inventors)
+
+
+if(nrow(links) > 0) {
+
+links$applicants <- stringr::str_to_title(links$applicants)
+links$inventors <- stringr::str_to_title(links$inventors)
+
+# Create a unique list of all nodes
+nodes <- data.frame(name = unique(c(links$applicants, links$inventors)))
+
+# Create an ID for each node
+nodes$id <- 0:(nrow(nodes) - 1)
+
+# Assign each node to its own group based on its ID
+nodes$group <- nodes$id
+
+# Map these IDs back onto your links
+links$from <- match(links$applicants, nodes$name) - 1
+links$to <- match(links$inventors, nodes$name) - 1
+
+# Generate a color palette with as many colors as there are nodes
+color_palette <- grDevices::rainbow(n = nrow(nodes))
+
+nodes$label <- nodes$name
+
+# Assign each node a color from the palette
+nodes$color <- color_palette
+
+# Now, use visNetwork and specify the color in visNodes
+visNetwork(nodes, links, width = "100%", height = "600px") %>%
+  visEdges(arrows = "") %>%
+  visOptions(highlightNearest = TRUE, nodesIdSelection = TRUE) %>%
+  visNodes(shape = "dot", color = list(background = nodes$color, border = nodes$color 
+  ),                                       scaling = list(
+      label = list(
+        enabled = TRUE,
+        min = 100000,
+        max = 1000000,
+        maxVisible = 100,
+        drawThreshold = 1
+      ),
+      min = 10,  # Minimum node size
+      max = 30   # Maximum node size
+    ),
+           font = list(face = "mono", size = 10)) %>%
+  visLayout(randomSeed = 123) # Seed for reproducible layout
+    
+  } else {
+    
+     print("We currently have no data to create a network")
+  }
+
+```
+
+#### Filing Locations
+
+This graph shows the primary regions in which applicants have filed patents relating to `r params$species`. It serves as an indicator of the commercial markets that applicants are targeting for their products. This information aid an understanding of the global interest and potential market strategies associated with these patent filings.
+
+```{r pat_map}
+
+library(ggplot2)
+library(dplyr)
+library(maps)
+library(RColorBrewer)
+
+pat_loc <- sqlquery(selectstatement = "country_name, pat_year.lens_id", tables = "pat_ents, pat_year, pat_core") %>% unique() %>% count(country_name) %>% arrange(desc(n))
+
+  if (nrow(pat_loc) > 0) {
+ 
+    pat_loc %>% barfunc(x = "country_name")
+    
+  } else {
+   
+    print("We currently have no data about the locations where patents relating to this species are filed")
+  }
+
+# country_names <- readr::read_delim("app/country_names.csv", 
+#  delim = ";", escape_double = FALSE, trim_ws = TRUE)
+
+# # These are location based and will need to change
+# country_names[118, "name_of_state"] <- "Russia"
+# country_names[195, "name_of_state"] <- "USA"
+# country_names[149, "name_of_state"] <- "USA"
+
+#pat_loc %>% inner_join(country_names, by = )
+
+# country_names <- country_names %>% mutate(cases = case_when(patent_location == "PCT" ~ 75, patent_location == "EPO" ~ 50, patent_location == "COUNTRY" ~ 92))
+# 
+# country_names <- country_names %>% dplyr::group_by(name_of_state) %>% 
+#   summarise(num = n(), totalcases = sum(cases)) %>% 
+#   unique()
+# 
+#  library(maps)
+#  world_map <- map_data("world")
+# 
+# ggplot(country_names) +
+#  geom_map(dat=world_map, map = world_map, aes(map_id=region),
+#                     fill="white", color="black", size=0.25) +
+#   geom_map(map = world_map, aes(map_id = name_of_state, fill = totalcases), size=0.25) +
+# scale_fill_gradient(low="#fff7bc", high="#cc4c02", name="Total Patents") +
+# expand_limits(x = world_map$long, y = world_map$lat) +
+# labs(x="", y="") +
+# theme(panel.grid=element_blank(), panel.border=element_blank()) +
+# theme(axis.ticks=element_blank(), axis.text=element_blank()) +
+# theme(legend.position="top") +
+#   theme(panel.background = element_rect(fill = "lightblue", colour = "lightblue")) + 
+#   theme(plot.margin = margin(0, 0, 0, 0, "cm"))
+
+
+
+
+
+# Use rnaturalearth for detailed map data
+# world_map <- ne_countries(scale = "medium", returnclass = "sf")
+# 
+# ggplot(data = country_names) +
+#  geom_sf(data = world_map, fill = "white", color = "#7f7f7f", size = 0.25) +
+#  geom_sf(data = world_map, aes(fill = country_names$totalcases), size = 0.25) +
+#  scale_fill_gradient(low = "skyblue", high = "darkblue", name = "Total Patents") +
+#  coord_sf(crs = "ESRI:54030") +  # Example of a different projection
+#  labs(x = "", y = "", title = "Patent Locations") +
+#  theme_minimal() +
+#  theme(legend.position = "top",
+#        panel.grid.major = element_blank(),
+#        panel.grid.minor = element_blank(),
+#        panel.border = element_blank(),
+#        axis.ticks = element_blank(),
+#        axis.text = element_blank())
+ 
+```
+
+#### Full Patent Table
+
+This table includes the titles of all patents related to this species. Titles appearing more than once may be part of the same patent family, meaning the same patent has been applied for across multiple jurisdictions. To navigate the table, you can utilize the search boxes for filtering. Additionally, by clicking on the hyperlinked titles, you can access the full details of each patent on The Lens website.
+
+```{r pat_full_tab}
+
+conn <- dbConnect(duckdb::duckdb(), db)
+
+pat_title_pane <- sqlquery(
+  selectstatement = "pat_core.title, applicants, inventors, country_name, pat_year.year_published, pat_ents.lens_id",
+  tables = "pat_year, pat_ents, pat_applicants, pat_inventors, pat_core") %>% unique()
+
+ if (nrow(pat_title_pane > 0)) {
+
+pat_title_pane$patent_title <- lens_func(query = pat_title_pane$lens_id, name = pat_title_pane$title, type = "pat")
+
+pat_title_pane %>% select(patent_title, applicants, country_name, year_published) %>% reactable(
+              groupBy = "patent_title",
+              columns = list(
+                patent_title = colDef(name = "Title", html = TRUE, sortable = FALSE),
+                applicants = colDef(name = "Applicant", sortable = FALSE, aggregate = "unique"),
+               # inventors = colDef(name = "Inventor", sortable = FALSE, aggregate = "unique"),
+                country_name = colDef(name = "Filing Location", sortable = FALSE, aggregate = "unique"),
+                year_published = colDef(name = "Year Published", sortable = TRUE, defaultSortOrder = "desc", aggregate = "unique")
+              ),
+              showSortable = TRUE,
+              filterable = TRUE,
+              defaultSorted = c("year_published"),
+              defaultSortOrder = "desc",
+              striped = TRUE,
+              theme = reactableTheme(
+                headerStyle = list(
+                  "&:hover[aria-sort]" = list(background = "hsl(0, 0%, 96%)"),
+                  "&[aria-sort='ascending'], &[aria-sort='descending']" = list(background = "hsl(0, 0%, 96%)"),
+                  borderColor = "#555"
+                )
+              )
+    )
+
+
+} else {
+
+  print("There is no data to display")
+
+}
+
+ dbDisconnect(conn, shutdown=TRUE)
+
+```
+:::
+
+### Applicants - Close Look
+
+::: panel-tabset
+This section offers an in-depth analysis of the various entities that are filing for patents concerning `r params$species`. It focuses on identifying and understanding the organizations, companies and individuals who are actively seeking patent protection in relation to this species.
+
+#### Applicants
+
+This section highlights the key entities that are actively applying for patents related to this species, providing insight into the primary players interested in this species.
+
+```{r applicants}
+
+pat_app <- sqlquery(selectstatement = "applicants, pat_year.lens_id", tables = "pat_year, pat_applicants, pat_ents") %>% unique() %>% count(applicants)
+ if (nrow(pat_app) > 0) {
+ 
+   pat_app$applicants <- stringr::str_to_title(pat_app$applicants)
+ pat_app %>% barfunc(x = "applicants")
+
+ } else {
+    print("We currently have no data about the top applicants for patents relating to this species")
+  }
+
+```
+
+#### Largest Increases
+
+This section identifies the applicants who have demonstrated the most significant increase in interest in this species during the period from 2017 to 2023, compared to the earlier span from 2010 to 2016, suggesting a growing or evolving commercial or research interest in this area.
+
+```{r applicants_l_increases}
+
+
+conn <- dbConnect(duckdb::duckdb(), db)
+
+   query <-  dbGetQuery(
+        conn = conn, statement =
+          paste0("
+
+    select applicants, pat_ents.lens_id, pat_year.year_published
+    from
+    pat_year
+    inner join pat_ents
+    on pat_year.lens_id  = pat_ents.lens_id
+    inner join pat_applicants
+    on pat_ents.lens_id = pat_applicants.lens_id
+    where year_published > 2000",
+            " and entity_text ilike ", shQuote(paste0("%", params$species, "%")),
+                 " and entity_label = ", shQuote("SPECIES"),
+                 ";")) %>% unique()
+  
+ 
+   top_applicants_2017_2023 <- query %>% filter(as.numeric(year_published) >= 2017) %>% count(applicants) %>% arrange(desc(n))
+   top_applicants_2010_2016 <- query %>% filter(as.numeric(year_published) <= 2016) %>%  filter(as.numeric(year_published) >= 2010) %>% 
+     count(applicants) %>% arrange(desc(n))
+   
+     top_applicants_2010_2016 <- top_applicants_2010_2016 %>% rename(name = n)
+    together <- inner_join(top_applicants_2017_2023, top_applicants_2010_2016, by = "applicants") %>% mutate(score = name - n) %>% filter(score > 0) %>% arrange(desc(score)) 
+    
+  if (nrow(together) > 0) {
+    
+    together %>% barfunc(xvar = "applicants", yvar = "score")
+  } else {
+   
+    print("There is no data to display")
+  }
+
+  dbDisconnect(conn, shutdown=TRUE) 
+
+```
+
+#### Emerging Applicants
+
+This section features the foremost applicants who have started filing patents related to this species in the time frame from 2017 to 2023, having not applied for patents concerning this species before, indicating that these entities have a new interest in this species.
+
+```{r applicants_emerging}
+
+
+conn <- dbConnect(duckdb::duckdb(), db)
+
+   query <-  dbGetQuery(
+        conn = conn, statement =
+          paste0("
+
+    select applicants, pat_ents.lens_id, pat_year.year_published
+    from
+    pat_year
+    inner join pat_ents
+    on pat_year.lens_id  = pat_ents.lens_id
+    inner join pat_applicants
+    on pat_ents.lens_id = pat_applicants.lens_id
+    where year_published > 2000",
+    " and entity_text ilike ", shQuote(paste0("%", params$species, "%")),
+                 " and entity_label = ", shQuote("SPECIES"),
+                 ";")) %>% unique()
+  
+ 
+   top_applicants_2017_2023 <- query %>% filter(as.numeric(year_published) >= 2017) %>% count(applicants)  %>% arrange(desc(n))
+   top_applicants_2016 <- query %>% filter(as.numeric(year_published) <= 2016) %>% 
+     count(applicants)  %>% arrange(desc(n))
+   
+    top_applicants_2016 <- top_applicants_2016 %>% rename(name = n)
+   
+  if (nrow(top_applicants_2017_2023) > 0) {
+    
+    
+    anti_join(top_applicants_2017_2023, top_applicants_2016, by = "applicants") %>% arrange(desc(n)) %>% 
+          barfunc(xvar = "applicants", yvar = "n")
+    
+  } else {
+   
+    print("We currently have no data about emerging species relating to this applicant")
+  }
+    
+  dbDisconnect(conn, shutdown=TRUE) 
+
+```
+:::
+
+### Academic Research
+
+The following is an overview of trends in published scientific research relating to this species. Novel applications or use cases for a species may first emerge in academic literature before they are reflected in patent data. By tracking these trends in scientific research, it is possible to identify potential new uses for the species. Furthermore, researchers may transition from academic study to patent application. Therefore, monitoring which researchers are focusing on this species, and whether they have previously filed for patents is of interest for compliance and regulatory purposes, offering insights into the future commercial exploitation of the species.
+
+::: panel-tabset
+#### Trends Over Time
+
+This graph shows the annual count of research publications referencing this particular species. Trends in the volume of these publications may be indicative of shifts in academic interest in this species.
+
+```{r academic_trends}
+
+lit_trends <- sqlquery(selectstatement = "year_published, lit_year.lens_id", tables = "lit_year, lit_ents", pat=FALSE) %>% unique() %>% count(year_published)
+
+if (nrow(lit_trends) > 0) {
+
+lit_trends %>% ggplot( aes(x = as.numeric(year_published), y = n)) +
+    geom_bar(stat = 'identity', fill = "#4e79a7") +
+     scale_x_continuous("Year Published", breaks = seq(min(lit_trends$year_published), max(lit_trends$year_published), by = 1)) +
+      xlab("Year") +
+      ylab("Publication Count") +
+      theme(
+        panel.grid.major = element_line(colour = "#e1ebeb"),
+        panel.grid.minor = element_line(colour = "#e1ebeb"),
+        panel.background = element_rect(fill = "white", colour = NA)
+      ) 
+  
+} else {
+  
+  print("We currently have no data on trends in the literature for this species")
+  
+}
+
+
+```
+
+#### Fields of Study
+
+This section outlines the key topics around which scientific research concerning `r params$species` has been conducted and published. It highlights the main areas of academic focus and inquiry related to this species, providing an overview of the dominant themes and subjects in the current body of research.
+
+```{r academic_fos}
+
+lit_fos <- sqlquery(selectcol = "fields_of_study", tables = "lit_year, lit_ents, lit_fos", pat = FALSE)
+ 
+ if (nrow(lit_fos ) > 0) {
+   lit_fos %>% barfunc(x = "fields_of_study")
+   
+ } else {
+  
+  print("We currently have no data on fields of study for this species")
+  
+}
+
+```
+
+#### Authors
+
+This graph identifies the most active authors publishing scientific work concerning this species. It highlights individuals who are leading contributors to the academic understanding of this species.
+
+```{r academic_authors}
+# Load Authors plot
+
+lit_auth <- sqlquery(selectcol = "author_name", tables = "lit_year, lit_ents, lit_fos, lit_authors", pat = FALSE)
+
+ if (nrow(lit_auth) > 0) {
+   
+ lit_auth %>% barfunc(x = "author_name")
+   
+ } else {
+  
+  print("We currently have no data on authors writing about this species")
+  
+}
+
+```
+
+#### Author Network
+
+This network graph visually represents the connections between authors who have published research on this species, highlighting the patterns of co-authorship in the research community focused on this species.
+
+```{r ac_author_network}
+
+library(visNetwork)
+
+start <- sqlquery(
+  selectstatement = "author_name, lit_authors.lens_id",
+  tables = "lit_year, lit_authors, lit_ents", pat = FALSE) %>% unique()  %>% mutate(author_name2 = author_name)
+
+if(nrow(start) > 0) {
+
+# Initialize an empty data frame for accumulating results
+links <- data.frame()
+
+for (i in unique(start$lens_id)) {
+
+  out <- start %>% filter(lens_id == i) %>%
+    select(author_name, author_name2) %>%
+   tidyr::expand(author_name, author_name2) %>%
+  subset(author_name != author_name2)
+  
+links <- bind_rows(links, out)
+
+}
+
+links$author_name <- stringr::str_to_title(links$author_name)
+links$author_name2 <- stringr::str_to_title(links$author_name2)
+
+# Create a unique list of all nodes
+nodes <- data.frame(name = unique(c(links$author_name, links$author_name2)))
+
+# Create an ID for each node
+nodes$id <- 0:(nrow(nodes) - 1)
+
+# Assign each node to its own group based on its ID
+nodes$group <- nodes$id
+
+# Map these IDs back onto your links
+links$from <- match(links$author_name, nodes$name) - 1
+links$to <- match(links$author_name2, nodes$name) - 1
+
+# Generate a color palette with as many colors as there are nodes
+color_palette <- grDevices::rainbow(n = nrow(nodes))
+
+nodes$label <- nodes$name
+
+# Assign each node a color from the palette
+nodes$color <- color_palette
+
+# Now, use visNetwork and specify the color in visNodes
+visNetwork(nodes, links, width = "100%", height = "600px") %>%
+  visEdges(arrows = "") %>%
+  visOptions(highlightNearest = TRUE, nodesIdSelection = TRUE) %>%
+  visNodes(shape = "dot", color = list(background = nodes$color, border = nodes$color 
+  ),                                       scaling = list(
+      label = list(
+        enabled = TRUE,
+        min = 100000,
+        max = 1000000,
+        maxVisible = 100,
+        drawThreshold = 1
+      ),
+      min = 10,  # Minimum node size
+      max = 30   # Maximum node size
+    ),
+           font = list(face = "mono", size = 10)) %>%
+  visLayout(randomSeed = 123) # Seed for reproducible layout
+
+  } else {
+ 
+  print("We currently have no data to create a network")
+   
+  }
+
+# networkD3 approach
+
+# library(networkD3)
+# 
+# links <- sqlquery(
+#   selectstatement = "author_name, lit_authors.lens_id",
+#   tables = "lit_year, lit_authors, lit_ents", pat = FALSE) %>% unique()  %>% mutate(author_name2 = author_name)
+# 
+# df <- data.frame(author_name = character(),
+#                  #lens_id = character(),
+#                  author_name2 = character(),
+#                  stringsAsFactors=FALSE)
+# 
+
+# 
+# }
+# 
+# if (nrow(df) > 0) {
+#    
+#  simpleNetwork(df, fontSize = 10, linkColour = "#d1fff2", nodeColour = "#226363", opacity = 1, linkDistance = 100, fontFamily = "mono", zoom = T, height = 300, width = 1000, charge = -40)
+#    
+#  } else {
+#   
+#   print("We currently have no data to display")
+#   
+# }
+
+```
+
+#### Institutional Affiliations
+
+This graph presents the principal institutional affiliations of authors who have published research about this species. It provides insights into which academic or research institutions are showing an interest in `r params$species`.
+
+```{r ac_institutional_affiliations}
+
+lit_aff <- sqlquery(selectcol = "affiliation_name", tables = "lit_year, lit_ents, lit_fos, lit_affiliations", pat = FALSE)
+    
+     if (nrow(lit_aff) > 0) {
+     lit_aff %>% barfunc(x = "affiliation_name")
+
+} else {
+  
+  print("We currently have no data about the affiliations of authors writing about this species")
+  
+}
+ 
+```
+
+#### Affiliation Network
+
+This network graph illustrates the connections between institutions supporting scientific work about this species, that is, which institutions have published works relating to this species together.
+
+```{r academic_network}
+
+library(networkD3)
+
+links <- sqlquery(
+  selectstatement = "affiliation_name, lit_affiliations.lens_id",
+  tables = "lit_year, lit_affiliations, lit_ents", pat = FALSE) %>% unique()  %>% mutate(affiliation_name2 = affiliation_name)
+
+df <- data.frame(affiliation_name = character(),
+                 affiliation_name2 = character(),
+                 stringsAsFactors=FALSE)
+
+for (i in unique(links$lens_id)) {
+ 
+  out <- links %>% filter(lens_id == i) %>% 
+    select(affiliation_name, affiliation_name2) %>% 
+   tidyr::expand(affiliation_name, affiliation_name2) %>% 
+  subset(affiliation_name != affiliation_name2)
+  
+df <- bind_rows(df, out)
+
+}
+
+if (nrow(df) > 0) {
+   
+ simpleNetwork(df, fontSize = 10, linkColour = "#d1fff2", nodeColour = "#226363", opacity = 1, linkDistance = 100, fontFamily = "mono", zoom = T, height = 300, width = 1000, charge = -40)
+   
+ } else {
+  
+  print("We currently have no data to display")
+  
+}
+
+```
+
+#### Article Data
+
+This table includes the titles of all research publications related to this species. To navigate the table, you can utilize the search boxes for filtering. Additionally, by clicking on the hyperlinked titles, you can access detailed views of each article on The Lens website
+
+```{r academic_full_table}
+
+
+# CHANGE TO THIS - REDUCING JOINS REDUCES LOSS OF DATA DUE TO EMPTY FIELDS
+lit_titles <- sqlquery(selectstatement = "title, lit_year.year_published, lit_core.lens_id", tables = "lit_core, lit_ents, lit_year", pat = FALSE)
+
+if (nrow(lit_titles) > 0) {
+  
+ lit_titles %>% reactable(
+              groupBy = "title",
+              columns = list(
+                title = colDef(name = "Title", html = FALSE, sortable = FALSE),
+                #author_name = colDef(name = "Author", aggregate = "unique", sortable = FALSE),
+               # affiliation_name = colDef(name = "Affiliated Organisation", aggregate = "unique", sortable = FALSE),
+                year_published = colDef(name = "Year Published", sortable = TRUE, defaultSortOrder = "desc", aggregate = "unique")
+              ),
+              striped = TRUE,
+              showSortable = TRUE,
+               filterable = TRUE,
+              defaultSorted = c("year_published"),
+              defaultSortOrder = "desc",
+              theme = reactableTheme(
+                headerStyle = list(
+                  "&:hover[aria-sort]" = list(background = "hsl(0, 0%, 96%)"),
+                  "&[aria-sort='ascending'], &[aria-sort='descending']" = list(background = "hsl(0, 0%, 96%)"),
+                  borderColor = "#555"
+                )
+              )
+    )
+
+  } else {
+  
+  print("There are currently no titles to display")
+  
+} 
+
+```
+:::
+
+### Genetic Sequences
+
+This is a hyperlinked table of all genetic sequence data related to this species from our database. If you click on any sequence title you will be taken to a page with more information about that accession from the NCBI database
+
+```{r, echo=FALSE, warnings=FALSE, message=FALSE}
+
+conn <- dbConnect(duckdb::duckdb(), db)
+
+
+dsitab <- dbGetQuery(
+        conn = conn, statement =
+          paste0("
+
+    select scientific_name, accession, description
+    from
+    dsi
+    where
+    lower(scientific_name) ilike ", shQuote(paste0("%", params$species, "%")),
+                 "
+           ;"))
+
+if (nrow(dsitab > 0)) {
+
+dsitab$sequence_title <- ncbi_url(query = dsitab$accession, name = dsitab$description)
+dsitab %>%
+  select(Sequence = sequence_title) %>%
+  unique() %>%
+  datatable(rownames = FALSE, escape = FALSE)
+
+} else {
+
+  print("There are no accessions for this species")
+}
+
+ dbDisconnect(conn, shutdown=TRUE)
+
+
+```

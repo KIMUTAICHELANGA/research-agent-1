@@ -9,7 +9,6 @@ RUN apt-get update && apt-get install -y \
     gfortran libatlas-base-dev \
     netcat-traditional \
     cython3 libgomp1 \
-    postgresql-client libpq-dev \
     python3-dev
 
 RUN pip install --upgrade pip setuptools wheel

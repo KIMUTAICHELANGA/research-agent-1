@@ -7,7 +7,6 @@ from .components import (
 )
 from .db import ContentDB
 from .utils import (
-    setup_logging,
     update_token_stats,
     get_token_usage, 
     load_research_history

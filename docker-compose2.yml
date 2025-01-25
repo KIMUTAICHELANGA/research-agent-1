@@ -1,0 +1,138 @@
+services:
+ nginx:
+   container_name: nginx
+   build:
+     context: ./nginx
+     dockerfile: Dockerfile
+   ports:
+     - "80:80"
+     - "443:443"
+   volumes:
+     - ./nginx/conf.d:/etc/nginx/conf.d
+     - ./nginx/ssl:/etc/nginx/ssl
+   depends_on:
+     research-server:
+       condition: service_healthy
+   healthcheck:
+     test: ["CMD", "curl", "-f", "http://research-server:8000/health || exit 1"]
+     interval: 10s
+     timeout: 5s
+     retries: 3
+     start_period: 30s
+   restart: unless-stopped
+   networks:
+     - app-network
+ postgres:
+   container_name: postgres
+   image: postgres:15
+   environment:
+     POSTGRES_USER: postgres
+     POSTGRES_DB: research_db
+     POSTGRES_PASSWORD: researchpassword
+   volumes:
+     - postgres-data:/var/lib/postgresql/data
+   ports:
+     - "5432:5432"
+   healthcheck:
+     test: ["CMD-SHELL", "pg_isready -U postgres"]
+     interval: 5s
+     timeout: 5s
+     retries: 5
+   networks:
+     - app-network
+
+ research-server:
+   container_name: research-server
+   build:
+     context: .
+     dockerfile: Dockerfile
+   volumes:
+     - .:/app
+     - content-data:/data
+     - ~/.aws:/root/.aws
+   ports:
+     - "8000:8000"
+     - "8501:8501"
+     - "5678:5678"
+   environment:
+     - PYTHONUNBUFFERED=1
+     - POSTGRES_CONNECTION=postgresql://postgres:researchpassword@postgres:5432/research_db
+     - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+     - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+     - AWS_DEFAULT_REGION=${AWS_REGION}
+     - AWS_BUCKET=${AWS_BUCKET}
+   env_file:
+     - .env
+   depends_on:
+     postgres:
+       condition: service_healthy
+   healthcheck:
+     test: ["CMD", "curl", "-f", "http://localhost:8000/health || exit 1"]
+     interval: 30s
+     timeout: 10s
+     retries: 3
+     start_period: 30s
+   restart: unless-stopped
+   command: >
+     sh -c "
+     /app/wait-for-it.sh postgres:5432 -t 60 &&
+     if [ \"$$INIT_DB\" = \"true\" ]; then
+       python init_db.py;
+     fi &&
+     uvicorn app:app --host 0.0.0.0 --port 8000 --reload &
+     streamlit run main.py --server.address=0.0.0.0 --server.port=8501
+     "
+   networks:
+     - app-network
+
+ rstudio:
+   container_name: rstudio
+   image: rocker/rstudio
+   ports:
+     - "8787:8787"
+   environment:
+     - PASSWORD=rstudiopassword
+   volumes:
+     - ./R:/home/rstudio/projects
+     - content-data:/data
+   healthcheck:
+     test: ["CMD", "curl", "-f", "http://localhost:8787"]
+     interval: 30s
+     timeout: 10s
+     retries: 3
+   depends_on:
+     research-server:
+       condition: service_healthy
+   restart: unless-stopped
+   networks:
+     - app-network
+
+ r_service:
+   container_name: r_service
+   build:
+     context: ./r_service
+     dockerfile: Dockerfile.r
+   volumes:
+     - ./r_service:/app
+     - content-data:/data
+     - ~/.aws:/root/.aws
+   environment:
+     - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+     - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+     - AWS_DEFAULT_REGION=${AWS_REGION}
+     - AWS_BUCKET=${AWS_BUCKET}
+   networks:
+     - app-network
+   depends_on:
+     research-server:
+       condition: service_healthy
+   restart: unless-stopped
+
+volumes:
+ postgres-data:
+ content-data:
+   driver: local
+
+networks:
+ app-network:
+   driver: bridge

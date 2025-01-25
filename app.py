@@ -1,16 +1,14 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
-import json
+import json, boto3, os, subprocess
 from pathlib import Path
-import boto3
-import os
-import subprocess
 from datetime import datetime
+from tools import GeneralAgent
+from research_components.research import run_tool
 
 app = FastAPI()
 
-# Paths and configs
 DATA_PATH = "/data"
 RESEARCH_PATH = f"{DATA_PATH}/research"
 REPORTS_PATH = f"{DATA_PATH}/reports"
@@ -18,64 +16,50 @@ R_SCRIPT_PATH = "/app/report.Rmd"
 S3_BUCKET = os.getenv("AWS_BUCKET")
 
 class ResearchRequest(BaseModel):
-   query: str
-   tool_name: Optional[str] = "General Agent"
-   species: str
+    query: str
+    tool_name: Optional[str] = "General Agent"
+    species: str
 
 @app.get("/")
 async def root():
-   return {"message": "Research API"}
+    return {"message": "Research API"}
 
 @app.get("/health")
 async def health():
-   return {"status": "healthy"}
+    return {"status": "healthy"}
 
 @app.post("/research/")
 async def perform_research(request: ResearchRequest, background_tasks: BackgroundTasks):
-   try:
-       tool = GeneralAgent(include_summary=True)
-       result, trace = run_tool(
-           tool_name=request.tool_name,
-           query=request.query,
-           tool=tool
-       )
+    try:
+        tool = GeneralAgent(include_summary=True)
+        result, trace = run_tool(
+            tool_name=request.tool_name,
+            query=request.query,
+            tool=tool
+        )
 
-       if result:
-           output_data = {
-               "summary": result.summary,
-               "content": [
-                   {
-                       "title": item.title,
-                       "url": item.url,
-                       "snippet": item.snippet,
-                       "content": item.content
-                   } for item in result.content
-               ],
-               "trace_data": trace.data,
-               "species": request.species
-           }
+        if result:
+            output_data = {
+                "summary": result.summary,
+                "content": [{"title": item.title, "url": item.url, "snippet": item.snippet, "content": item.content} for item in result.content],
+                "trace_data": trace.data,
+                "species": request.species
+            }
 
-           timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-           filename = f"research_{timestamp}.json"
-           filepath = Path(RESEARCH_PATH) / filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = Path(RESEARCH_PATH) / f"research_{timestamp}.json"
+            Path(RESEARCH_PATH).mkdir(parents=True, exist_ok=True)
+            Path(REPORTS_PATH).mkdir(parents=True, exist_ok=True)
 
-           Path(RESEARCH_PATH).mkdir(parents=True, exist_ok=True)
-           Path(REPORTS_PATH).mkdir(parents=True, exist_ok=True)
+            with open(filepath, 'w') as f:
+                json.dump(output_data, f)
 
-           with open(filepath, 'w') as f:
-               json.dump(output_data, f)
+            background_tasks.add_task(generate_report, request.species)
+            return {"status": "success", "file_path": str(filepath)}
 
-           background_tasks.add_task(generate_report, request.species)
-           
-           return {
-               "status": "success",
-               "file_path": str(filepath)
-           }
-
-       raise HTTPException(status_code=400, detail="Research failed")
-
-   except Exception as e:
-       raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=400, detail="Research failed")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 async def generate_report(species: str):
    try:

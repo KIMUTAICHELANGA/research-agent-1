@@ -1,83 +1,15 @@
-research-server  | postgres:5432 is available
+research-server  | INFO:     Will watch for changes in these directories: ['/app']
+research-server  | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+research-server  | INFO:     Started reloader process [8] using WatchFiles
 research-server  | 
-postgres         | The files belonging to this database system will be owned by user "postgres".
-postgres         | This user must also own the server process.
-postgres         | 
-postgres         | The database cluster will be initialized with locale "en_US.utf8".
-postgres         | The default database encoding has accordingly been set to "UTF8".
-postgres         | The default text search configuration will be set to "english".
-postgres         | 
-postgres         | Data page checksums are disabled.
-postgres         | 
-postgres         | fixing permissions on existing directory /var/lib/postgresql/data ... ok
-postgres         | creating subdirectories ... ok
-postgres         | selecting dynamic shared memory implementation ... posix
-postgres         | selecting default max_connections ... 100
-postgres         | selecting default shared_buffers ... 128MB
-postgres         | selecting default time zone ... Etc/UTC
 research-server  | Collecting usage statistics. To deactivate, set browser.gatherUsageStats to False.
-postgres         | creating configuration files ... ok
-postgres         | running bootstrap script ... ok
-postgres         | performing post-bootstrap initialization ... ok
-postgres         | syncing data to disk ... ok
-postgres         | 
-postgres         | 
-postgres         | Success. You can now start the database server using:
-postgres         | 
-postgres         |     pg_ctl -D /var/lib/postgresql/data -l logfile start
-postgres         | 
-postgres         | initdb: warning: enabling "trust" authentication for local connections
-postgres         | initdb: hint: You can change this by editing pg_hba.conf or using the option -A, or --auth-local and --auth-host, the next time you run initdb.
-postgres         | waiting for server to start....2025-01-25 13:59:43.554 UTC [49] LOG:  starting PostgreSQL 15.10 (Debian 15.10-1.pgdg120+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14) 12.2.0, 64-bit
-postgres         | 2025-01-25 13:59:43.556 UTC [49] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
-postgres         | 2025-01-25 13:59:43.559 UTC [52] LOG:  database system was shut down at 2025-01-25 13:59:43 UTC
-postgres         | 2025-01-25 13:59:43.564 UTC [49] LOG:  database system is ready to accept connections
-postgres         |  done
-postgres         | server started
-postgres         | CREATE DATABASE
-postgres         | 
-postgres         | 
-postgres         | /usr/local/bin/docker-entrypoint.sh: ignoring /docker-entrypoint-initdb.d/*
-postgres         | 
-postgres         | waiting for server to shut down....2025-01-25 13:59:43.794 UTC [49] LOG:  received fast shutdown request
 research-server  | 
 research-server  | 
 research-server  |   You can now view your Streamlit app in your browser.
 research-server  | 
 research-server  |   URL: http://0.0.0.0:8501
 research-server  | 
-research-server  | 2025-01-25 13:59:51,309 - INFO - INIT_DB is true. Running database initialization.
-research-server  | INFO:     Will watch for changes in these directories: ['/app']
-research-server  | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-research-server  | INFO:     Started reloader process [7] using WatchFiles
-research-server  | INFO:     Started server process [40]
+research-server  | INFO:     Started server process [11]
 research-server  | INFO:     Waiting for application startup.
 research-server  | INFO:     Application startup complete.
-postgres         | 2025-01-25 13:59:43.796 UTC [49] LOG:  aborting any active transactions
-postgres         | 2025-01-25 13:59:43.798 UTC [49] LOG:  background worker "logical replication launcher" (PID 55) exited with exit code 1
-postgres         | 2025-01-25 13:59:43.799 UTC [50] LOG:  shutting down
-postgres         | 2025-01-25 13:59:43.800 UTC [50] LOG:  checkpoint starting: shutdown immediate
-postgres         | 2025-01-25 13:59:43.908 UTC [50] LOG:  checkpoint complete: wrote 918 buffers (5.6%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.015 s, sync=0.091 s, total=0.109 s; sync files=301, longest=0.075 s, average=0.001 s; distance=4222 kB, estimate=4222 kB
-postgres         | 2025-01-25 13:59:43.916 UTC [49] LOG:  database system is shut down
-postgres         |  done
-postgres         | server stopped
-postgres         | 
-postgres         | PostgreSQL init process complete; ready for start up.
-postgres         | 
-postgres         | 2025-01-25 13:59:44.017 UTC [1] LOG:  starting PostgreSQL 15.10 (Debian 15.10-1.pgdg120+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14) 12.2.0, 64-bit
-postgres         | 2025-01-25 13:59:44.017 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
-postgres         | 2025-01-25 13:59:44.017 UTC [1] LOG:  listening on IPv6 address "::", port 5432
-postgres         | 2025-01-25 13:59:44.019 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
-postgres         | 2025-01-25 13:59:44.023 UTC [65] LOG:  database system was shut down at 2025-01-25 13:59:43 UTC
-postgres         | 2025-01-25 13:59:44.028 UTC [1] LOG:  database system is ready to accept connections
-research-server  | 2025-01-25 14:00:03,549 - INFO - Database connection initialized successfully
-research-server  | 2025-01-25 14:00:03,736 - INFO - Retrieving accuracy evaluations for query: None
-research-server  | 2025-01-25 14:00:03,783 - INFO - Retrieving source coverage evaluations for query: None
-research-server  | 2025-01-25 14:00:03,822 - INFO - Retrieving logical coherence evaluations for query: None
-research-server  | 2025-01-25 14:00:03,824 - INFO - Retrieving answer relevance evaluations for query: None
-research-server  | Columns: ['id', 'query', 'timestamp', 'overall_score', 'rouge1_score', 'rouge2_score', 'rougeL_score', 'semantic_similarity', 'hallucination_score', 'suspicious_segments']
-research-server  | Columns: ['id', 'query', 'timestamp', 'overall_score', 'rouge1_score', 'rouge2_score', 'rougeL_score', 'semantic_similarity', 'hallucination_score', 'suspicious_segments']
-research-server  | []
-research-server  | INFO:     172.18.0.1:51444 - "GET / HTTP/1.1" 200 OK
-research-server  | INFO:     172.18.0.1:44204 - "GET /docs HTTP/1.1" 200 OK
-research-server  | INFO:     172.18.0.1:44210 - "GET /openapi.json HTTP/1.1" 200 OK
+research-server  | INFO:     172.18.0.1:36352 - "GET / HTTP/1.1" 200 OK

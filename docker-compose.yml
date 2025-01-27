@@ -1,3 +1,10 @@
+version: '3.8'
+
+# Common build settings
+x-build-args: &build-args
+  BUILDKIT_INLINE_CACHE: 1
+  DOCKER_BUILDKIT: 1
+
 services:
   nginx:
     image: nginx:latest
@@ -7,19 +14,28 @@ services:
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./nginx/ssl:/etc/nginx/ssl
-      - ./nginx/logs:/var/log/nginx 
+      - ./nginx/logs:/var/log/nginx
     networks:
       - app-network
-
+    depends_on:
+      - research-server
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   research-server:
     container_name: research-server
     build:
       context: .
       dockerfile: Dockerfile
+      args: *build-args
+      cache_from:
+        - research-server:latest
     volumes:
       - .:/app
-      - content-data:/data
+      - content-data:/data/research
       - ~/.aws:/root/.aws
     ports:
       - "8000:8000"
@@ -31,6 +47,8 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_DEFAULT_REGION=${AWS_REGION}
       - AWS_BUCKET=${AWS_BUCKET}
+      - HOME=/root
+      - PANDOC_DIR=/root/.pandoc
     env_file:
       - .env
     healthcheck:
@@ -47,17 +65,29 @@ services:
       "
     networks:
       - app-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    shm_size: '2gb'
 
   rstudio:
     container_name: rstudio
-    image: rocker/rstudio
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args: *build-args
+      cache_from:
+        - rstudio:latest
     ports:
       - "8787:8787"
     environment:
       - PASSWORD=rstudiopassword
+      - HOME=/root
+      - PANDOC_DIR=/root/.pandoc
     volumes:
       - ./R:/home/rstudio/projects
-      - content-data:/data
+      - content-data:/data/
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8787"]
       interval: 30s
@@ -68,26 +98,47 @@ services:
         condition: service_healthy
     networks:
       - app-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    shm_size: '1gb'
 
   r_service:
     container_name: r_service
     build:
-      context: ./r_service
-      dockerfile: Dockerfile.r
+      context: .
+      dockerfile: Dockerfile
+      args: *build-args
+      cache_from:
+        - r_service:latest
     volumes:
-      - ./r_service:/app
-      - content-data:/data
+      - ./r_service:/app/r_service
+      - content-data:/data/research
+      - ./r_service/reports:/data/reports
       - ~/.aws:/root/.aws
     environment:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_DEFAULT_REGION=${AWS_REGION}
       - AWS_BUCKET=${AWS_BUCKET}
+      - HOME=/root
+      - PANDOC_DIR=/root/.pandoc
+    healthcheck:
+      test: ["CMD", "R", "-q", "-e", "TRUE"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - app-network
     depends_on:
       research-server:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    shm_size: '1gb'
 
 volumes:
   content-data:
@@ -96,3 +147,4 @@ volumes:
 networks:
   app-network:
     driver: bridge
+    name: research-network

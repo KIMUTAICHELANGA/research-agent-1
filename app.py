@@ -12,7 +12,7 @@ app = FastAPI()
 DATA_PATH = "/data"
 RESEARCH_PATH = f"{DATA_PATH}/research"
 REPORTS_PATH = f"{DATA_PATH}/reports"
-R_SCRIPT_PATH = "/app/report.Rmd"
+R_SCRIPT_PATH = "/app/r_service/report.Rmd"
 S3_BUCKET = os.getenv("AWS_BUCKET")
 
 class ResearchRequest(BaseModel):
@@ -63,26 +63,12 @@ async def perform_research(request: ResearchRequest, background_tasks: Backgroun
 
 async def generate_report(species: str):
    try:
-       latest_research = max(Path(RESEARCH_PATH).glob("research_*.json"),
-                           key=os.path.getctime)
-
+       latest_research = max(Path(RESEARCH_PATH).glob("research_*.json"), key=os.path.getctime)
+       
        if not os.path.exists(R_SCRIPT_PATH):
            raise Exception(f"R script not found at {R_SCRIPT_PATH}")
-
-       cmd = [
-           "Rscript",
-           "-e",
-           f"""
-           rmarkdown::render(
-               '{R_SCRIPT_PATH}',
-               params = list(
-                   species = '{species}'
-               ),
-               output_file = '{REPORTS_PATH}/{species}.html'
-           )
-           """
-       ]
        
+       cmd = ["Rscript", "-e", f"rmarkdown::render('{R_SCRIPT_PATH}', params = list(species = '{species}'), output_file = '{REPORTS_PATH}/{species}.html')"]
        result = subprocess.run(
            cmd,
            capture_output=True,
@@ -99,9 +85,9 @@ async def generate_report(species: str):
            url = f"https://{S3_BUCKET}.s3.amazonaws.com/{s3_key}"
            
            return {"status": "success", "report_url": url}
-           
+       
        raise Exception(f"R script failed: {result.stderr}")
-
+   
    except Exception as e:
        print(f"Report generation failed: {str(e)}")
        return None

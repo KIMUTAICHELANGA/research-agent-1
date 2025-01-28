@@ -47,6 +47,7 @@ RUN mkdir -p /root/.R && chmod -R 777 /root/.R && \
 RUN --mount=type=cache,target=/root/.R/cache \
     Rscript -e 'install.packages(c( \
     "rmarkdown", \
+    "evaluate", \
     "knitr", \
     "dplyr", \
     "ggplot2", \
@@ -109,6 +110,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     sqlite3 \
     netcat-traditional
 
+# Create R library directory
+RUN mkdir -p /usr/local/lib/R/site-library && \
+    chmod -R 777 /usr/local/lib/R/site-library
+
 # Copy Python packages from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
@@ -117,10 +122,12 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /usr/lib/R /usr/lib/R
 COPY --from=builder /root/.R /root/.R
 COPY --from=builder /root/.TinyTeX /root/.TinyTeX
+COPY --from=builder /usr/local/lib/R/site-library /usr/local/lib/R/site-library
 
 # Set environment variables
 ENV R_HOME=/usr/lib/R \
     R_LIBS_USER=/root/.R \
+    R_LIBS=/usr/local/lib/R/site-library:/usr/lib/R/site-library:/usr/lib/R/library \
     PATH="/usr/lib/R/bin:/usr/lib/R/bin/R:/usr/bin:/usr/local/bin:/root/.TinyTeX/bin/x86_64-linux:${PATH}" \
     HOME=/root \
     PANDOC_DIR=/root/.pandoc
@@ -131,8 +138,11 @@ WORKDIR /app
 # Copy application code
 COPY . .
 
+# Install R packages in the final stage to ensure they're properly installed
+RUN R -e 'install.packages(c("evaluate", "rmarkdown", "knitr", "yaml", "xfun", "jsonlite"), repos="https://cloud.r-project.org/", dependencies=TRUE)'
+
 # Verify R installation and packages
-RUN R -e 'library(rmarkdown); library(dplyr); library(ggplot2); library(plotly)' && \
+RUN R -e 'library(evaluate); library(rmarkdown); library(dplyr); library(ggplot2); library(plotly)' && \
     which R && R --version && \
     which Rscript && Rscript --version
 

@@ -14,7 +14,8 @@ echo: false
 message: false
 error: false
 ---
-
+# Set the library path first
+.libPaths("/usr/local/lib/R/site-library")
 ```{r}
 spec <- stringr::str_to_title(params$species)
 cap_spec <- stringr::str_to_title(spec)

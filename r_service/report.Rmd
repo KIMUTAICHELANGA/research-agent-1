@@ -16,6 +16,10 @@ error: false
 ---
 # Set the library path first
 .libPaths("/usr/local/lib/R/site-library")
+
+# Add these lines to set environment variables
+Sys.setenv(HOME = "/root")
+Sys.setenv(PANDOC_DIR = "/root/.pandoc")
 ```{r}
 spec <- stringr::str_to_title(params$species)
 cap_spec <- stringr::str_to_title(spec)

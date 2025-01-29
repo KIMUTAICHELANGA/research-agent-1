@@ -1,10 +1,3 @@
-version: '3.8'
-
-# Common build settings
-x-build-args: &build-args
-  BUILDKIT_INLINE_CACHE: 1
-  DOCKER_BUILDKIT: 1
-
 services:
   nginx:
     image: nginx:latest
@@ -18,29 +11,26 @@ services:
     networks:
       - app-network
     depends_on:
-      - research-server
+      - r_service
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
-      timeout: 10s
+      timeout: 20s
       retries: 3
 
-  research-server:
-    container_name: research-server
+  r_service:
+    container_name: r_service
     build:
       context: .
       dockerfile: Dockerfile
-      args: *build-args
-      cache_from:
-        - research-server:latest
+    ports:
+      - "8000:8000"  # FastAPI
+      - "8501:8501"  # Streamlit
+      - "8787:8787"  # RStudio
     volumes:
       - .:/app
-      - content-data:/data/research
+      - content-data:/data
       - ~/.aws:/root/.aws
-    ports:
-      - "8000:8000"
-      - "8501:8501"
-      - "5678:5678"
     environment:
       - PYTHONUNBUFFERED=1
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
@@ -49,16 +39,17 @@ services:
       - AWS_BUCKET=${AWS_BUCKET}
       - HOME=/root
       - PANDOC_DIR=/root/.pandoc
+      - PASSWORD=rstudiopassword  # RStudio password
     env_file:
       - .env
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 60s
+      test: ["CMD-SHELL", "curl -f http://localhost:8787 || exit 1"]
+      interval: 30s
       timeout: 20s
-      retries: 7
-      start_period: 40s
+      retries: 3
     command: >
       sh -c "
+        /init &
         uvicorn app:app --host 0.0.0.0 --port 8000 &
         streamlit run main.py --server.address=0.0.0.0 --server.port=8501 &
         wait
@@ -70,75 +61,6 @@ services:
         limits:
           memory: 4G
     shm_size: '2gb'
-
-  rstudio:
-    container_name: rstudio
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args: *build-args
-      cache_from:
-        - rstudio:latest
-    ports:
-      - "8787:8787"
-    environment:
-      - PASSWORD=rstudiopassword
-      - HOME=/root
-      - PANDOC_DIR=/root/.pandoc
-    volumes:
-      - ./R:/home/rstudio/projects
-      - content-data:/data/
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8787"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    depends_on:
-      research-server:
-        condition: service_healthy
-    networks:
-      - app-network
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-    shm_size: '1gb'
-
-  r_service:
-    container_name: r_service
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args: *build-args
-      cache_from:
-        - r_service:latest
-    volumes:
-      - ./r_service:/app/r_service
-      - content-data:/data/research
-      - ./r_service/reports:/data/reports
-      - ~/.aws:/root/.aws
-    environment:
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_DEFAULT_REGION=${AWS_REGION}
-      - AWS_BUCKET=${AWS_BUCKET}
-      - HOME=/root
-      - PANDOC_DIR=/root/.pandoc
-    healthcheck:
-      test: ["CMD", "R", "-q", "-e", "TRUE"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - app-network
-    depends_on:
-      research-server:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-    shm_size: '1gb'
 
 volumes:
   content-data:
